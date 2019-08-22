@@ -214,8 +214,8 @@ Removes the index named ``name`` from the model with ``model_name``.
 
 .. versionadded:: 2.2
 
-Creates a constraint in the database table for the model with ``model_name``.
-``constraint`` is an instance of :class:`~django.db.models.CheckConstraint`.
+Creates a :doc:`constraint </ref/models/constraints>` in the database table for
+the model with ``model_name``.
 
 ``RemoveConstraint``
 --------------------
@@ -413,7 +413,7 @@ if ``atomic=True`` is passed to the ``RunPython`` operation.
 A highly specialized operation that let you mix and match the database
 (schema-changing) and state (autodetector-powering) aspects of operations.
 
-It accepts two list of operations, and when asked to apply state will use the
+It accepts two lists of operations, and when asked to apply state will use the
 state list, and when asked to apply changes to the database will use the database
 list. Do not use this operation unless you're very sure you know what you're doing.
 

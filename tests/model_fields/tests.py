@@ -1,12 +1,14 @@
 import pickle
 
 from django import forms
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.test import SimpleTestCase, TestCase
 from django.utils.functional import lazy
 
 from .models import (
-    Bar, Foo, RenamedField, VerboseNameField, Whiz, WhizIter, WhizIterEmpty,
+    Bar, Choiceful, Foo, RenamedField, VerboseNameField, Whiz, WhizDelayed,
+    WhizIter, WhizIterEmpty,
 )
 
 
@@ -103,6 +105,51 @@ class BasicFieldTests(SimpleTestCase):
 
 class ChoicesTests(SimpleTestCase):
 
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.no_choices = Choiceful._meta.get_field('no_choices')
+        cls.empty_choices = Choiceful._meta.get_field('empty_choices')
+        cls.empty_choices_bool = Choiceful._meta.get_field('empty_choices_bool')
+        cls.empty_choices_text = Choiceful._meta.get_field('empty_choices_text')
+        cls.with_choices = Choiceful._meta.get_field('with_choices')
+
+    def test_choices(self):
+        self.assertIsNone(self.no_choices.choices)
+        self.assertEqual(self.empty_choices.choices, ())
+        self.assertEqual(self.with_choices.choices, [(1, 'A')])
+
+    def test_flatchoices(self):
+        self.assertEqual(self.no_choices.flatchoices, [])
+        self.assertEqual(self.empty_choices.flatchoices, [])
+        self.assertEqual(self.with_choices.flatchoices, [(1, 'A')])
+
+    def test_check(self):
+        self.assertEqual(Choiceful.check(), [])
+
+    def test_invalid_choice(self):
+        model_instance = None  # Actual model instance not needed.
+        self.no_choices.validate(0, model_instance)
+        msg = "['Value 99 is not a valid choice.']"
+        with self.assertRaisesMessage(ValidationError, msg):
+            self.empty_choices.validate(99, model_instance)
+        with self.assertRaisesMessage(ValidationError, msg):
+            self.with_choices.validate(99, model_instance)
+
+    def test_formfield(self):
+        no_choices_formfield = self.no_choices.formfield()
+        self.assertIsInstance(no_choices_formfield, forms.IntegerField)
+        fields = (
+            self.empty_choices, self.with_choices, self.empty_choices_bool,
+            self.empty_choices_text,
+        )
+        for field in fields:
+            with self.subTest(field=field):
+                self.assertIsInstance(field.formfield(), forms.ChoiceField)
+
+
+class GetFieldDisplayTests(SimpleTestCase):
+
     def test_choices_and_field_display(self):
         """
         get_choices() interacts with get_FIELD_display() to return the expected
@@ -113,6 +160,13 @@ class ChoicesTests(SimpleTestCase):
         self.assertEqual(Whiz(c=9).get_c_display(), 9)          # Invalid value
         self.assertIsNone(Whiz(c=None).get_c_display())         # Blank value
         self.assertEqual(Whiz(c='').get_c_display(), '')        # Empty value
+        self.assertEqual(WhizDelayed(c=0).get_c_display(), 'Other')  # Delayed choices
+
+    def test_get_FIELD_display_translated(self):
+        """A translated display value is coerced to str."""
+        val = Whiz(c=5).get_c_display()
+        self.assertIsInstance(val, str)
+        self.assertEqual(val, 'translated')
 
     def test_iterator_choices(self):
         """
@@ -134,6 +188,11 @@ class ChoicesTests(SimpleTestCase):
 
 
 class GetChoicesTests(SimpleTestCase):
+
+    def test_empty_choices(self):
+        choices = []
+        f = models.CharField(choices=choices)
+        self.assertEqual(f.get_choices(include_blank=False), choices)
 
     def test_blank_in_choices(self):
         choices = [('', '<><>'), ('a', 'A')]
@@ -163,9 +222,9 @@ class GetChoicesOrderingTests(TestCase):
 
     @classmethod
     def setUpTestData(cls):
-        cls.foo1 = Foo.objects.create(a='a', d='12.34')
+        cls.foo1 = Foo.objects.create(a='a', d='12.35')
         cls.foo2 = Foo.objects.create(a='b', d='12.34')
-        cls.bar1 = Bar.objects.create(a=cls.foo1, b='a')
+        cls.bar1 = Bar.objects.create(a=cls.foo1, b='b')
         cls.bar2 = Bar.objects.create(a=cls.foo2, b='a')
         cls.field = Bar._meta.get_field('a')
 
@@ -182,6 +241,14 @@ class GetChoicesOrderingTests(TestCase):
             [self.foo2, self.foo1]
         )
 
+    def test_get_choices_default_ordering(self):
+        self.addCleanup(setattr, Foo._meta, 'ordering', Foo._meta.ordering)
+        Foo._meta.ordering = ('d',)
+        self.assertChoicesEqual(
+            self.field.get_choices(include_blank=False),
+            [self.foo2, self.foo1]
+        )
+
     def test_get_choices_reverse_related_field(self):
         self.assertChoicesEqual(
             self.field.remote_field.get_choices(include_blank=False, ordering=('a',)),
@@ -189,5 +256,13 @@ class GetChoicesOrderingTests(TestCase):
         )
         self.assertChoicesEqual(
             self.field.remote_field.get_choices(include_blank=False, ordering=('-a',)),
+            [self.bar2, self.bar1]
+        )
+
+    def test_get_choices_reverse_related_field_default_ordering(self):
+        self.addCleanup(setattr, Bar._meta, 'ordering', Bar._meta.ordering)
+        Bar._meta.ordering = ('b',)
+        self.assertChoicesEqual(
+            self.field.remote_field.get_choices(include_blank=False),
             [self.bar2, self.bar1]
         )
